@@ -1,4 +1,5 @@
 package org.simonhareter.springinit.util;
 
-public record DependencyRow(Dependency dependency) implements DialogRow {
+public record DependencyRow(Dependency dependency, boolean isSelected) implements DialogRow {
+
 }

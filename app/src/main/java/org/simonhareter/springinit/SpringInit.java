@@ -126,14 +126,13 @@ public class SpringInit {
     public static final char V = '│';
 
     private List<DialogRow> DEPENDENCY_MENU_ITEMS;
+    private Spacer spacer;
     private Header filter, selected, available, nothingSelected;
     private Dialog dependencyDialog;
     private int depCursorY = 0, previousDepCursorY = 0, depScrollOffsetY = 0;
-    private List<DependencyRow> selectedDependencies;
-    private Dependency[] allDependencies;
+    private List<DependencyRow> availableDependencies, tempSelectedDependencies, selectedDependencies;
     private static final int SCROLL_DEP_MARGIN = 5;
     private boolean scrollOffsetChanged;
-    private final int nonDependencyRows = 7;
 
     // ------------------------------------------------------------------
 
@@ -144,6 +143,7 @@ public class SpringInit {
         this.previousSelection = new int[11];
         this.currentSelection = new int[11];
         this.selectedDependencies = new ArrayList<>();
+        this.tempSelectedDependencies = new ArrayList<>();
         this.DEPENDENCY_MENU_ITEMS = new ArrayList<>();
     }
 
@@ -215,8 +215,6 @@ public class SpringInit {
         if (doesConfigExist()) {
             loadConfig();
         }
-
-        populateAllDependencyArray();
 
         fillMenuGrid();
     }
@@ -1474,9 +1472,11 @@ public class SpringInit {
 
             switch (key) {
                 case 'q', '\033' -> {
+                    this.tempSelectedDependencies.clear();
+                    this.availableDependencies.clear();
                     isAddDependencyRunning = false;
                 }
-                case 'A', 'B' -> {
+                case 'A', 'B', 'j', 'k' -> {
                     moveDependencyCursor(key);
                     moveDependencyCursorLine();
 
@@ -1486,7 +1486,17 @@ public class SpringInit {
                 }
                 case ' ' -> {
                     selectDependency();
+                    if (this.tempSelectedDependencies.size() > 1) {
+                        moveDependencyCursor('B');
+                        moveDependencyCursorLine();
+                    }
                     rerenderDependencies();
+                }
+                case '\r', '\n' -> {
+                    saveDependencies();
+                    this.tempSelectedDependencies.clear();
+                    this.availableDependencies.clear();
+                    isAddDependencyRunning = false;
                 }
                 case 'g' -> {
                     int key2 = readKey();
@@ -1517,24 +1527,64 @@ public class SpringInit {
     }
 
     private void selectDependency() {
-        int index = this.depCursorY + this.depScrollOffsetY + this.selectedDependencies.size() + 1;
-        DialogRow selectedRow = this.DEPENDENCY_MENU_ITEMS.get(index);
+        int selectedSize = 1, uiRows = 6;
+        if (!this.tempSelectedDependencies.isEmpty()) {
+            selectedSize = this.tempSelectedDependencies.size();
+        }
 
-        if (selectedRow instanceof DependencyRow dependencyRow) {
-            this.selectedDependencies.add(dependencyRow);
-            if (this.selectedDependencies.size() == 1) {
+        int index = this.depCursorY - selectedSize - uiRows + this.depScrollOffsetY;
+
+        if (index < 0) {
+            return;
+        }
+
+        DependencyRow dependencyRow = this.availableDependencies.get(index);
+
+        // debug(dependencyRow.dependency().name());
+        this.availableDependencies.remove(dependencyRow);
+
+        DependencyRow updatedRow = new DependencyRow(dependencyRow.dependency(), true);
+        this.tempSelectedDependencies.add(updatedRow);
+
+        updateSelectedHeader();
+        updateAvailableHeader();
+
+        rebuildDependencyMenu();
+    }
+
+    private void saveDependencies() {
+        this.selectedDependencies = new ArrayList<>(this.tempSelectedDependencies);
+    }
+
+    private void rebuildDependencyMenu() {
+        this.DEPENDENCY_MENU_ITEMS.clear();
+
+        this.DEPENDENCY_MENU_ITEMS.add(this.spacer);
+        this.DEPENDENCY_MENU_ITEMS.add(this.filter);
+        this.DEPENDENCY_MENU_ITEMS.add(this.spacer);
+        this.DEPENDENCY_MENU_ITEMS.add(this.selected);
+
+        if (this.tempSelectedDependencies.isEmpty()) {
+            this.DEPENDENCY_MENU_ITEMS.add(this.nothingSelected);
+        } else {
+            for (DependencyRow row : this.tempSelectedDependencies) {
+                this.DEPENDENCY_MENU_ITEMS.add(row);
             }
+        }
 
-            this.DEPENDENCY_MENU_ITEMS.remove(index - this.selectedDependencies.size());
-            updateSelectedHeader();
-            updateAvailableHeader();
+        this.DEPENDENCY_MENU_ITEMS.add(this.spacer);
+
+        this.DEPENDENCY_MENU_ITEMS.add(this.available);
+
+        for (DependencyRow row : this.availableDependencies) {
+            this.DEPENDENCY_MENU_ITEMS.add(row);
         }
     }
 
     private void updateSelectedHeader() {
         this.selected = new Header(List.of(
                 new TextSegment("Selected ", WHITE),
-                new TextSegment("(" + this.selectedDependencies.size() + ")", BORDER_COLOR)));
+                new TextSegment("(" + this.tempSelectedDependencies.size() + ")", BORDER_COLOR)));
 
         this.DEPENDENCY_MENU_ITEMS.set(3, this.selected);
     }
@@ -1542,7 +1592,7 @@ public class SpringInit {
     private void updateAvailableHeader() {
         this.available = new Header(List.of(
                 new TextSegment("Available ", WHITE),
-                new TextSegment("(" + (this.DEPENDENCY_MENU_ITEMS.size() - this.nonDependencyRows) + ")",
+                new TextSegment("(" + (this.availableDependencies.size()) + ")",
                         BORDER_COLOR)));
 
         this.DEPENDENCY_MENU_ITEMS.set(6, this.available);
@@ -1628,6 +1678,7 @@ public class SpringInit {
         boolean isCurrRowHighlighted = isHighlighted(this.depCursorY);
 
         renderDependencyCursorLine(builder, isCurrRowHighlighted, this.depCursorY + 1);
+
         if (this.scrollOffsetChanged || this.depCursorY <= this.dependencyDialog.getHeight() - SCROLL_DEP_MARGIN) {
             renderDependencyRow(currRow, builder, this.depCursorY + 1, getOffsetX(currRow),
                     isCurrRowHighlighted, this.depCursorY);
@@ -1638,6 +1689,7 @@ public class SpringInit {
             boolean isPrevRowHighlighted = isHighlighted(this.previousDepCursorY);
 
             renderDependencyCursorLine(builder, isPrevRowHighlighted, this.previousDepCursorY + 1);
+
             if (this.scrollOffsetChanged || this.depCursorY <= this.dependencyDialog.getHeight() - SCROLL_DEP_MARGIN) {
                 renderDependencyRow(prevRow, builder, this.previousDepCursorY + 1,
                         getOffsetX(prevRow), isPrevRowHighlighted, this.previousDepCursorY);
@@ -1664,6 +1716,7 @@ public class SpringInit {
 
     private void renderDependencyRow(DialogRow row, StringBuilder builder, int offsetY, int offsetX,
             boolean isHighlighted, int index) {
+
         if (row instanceof Header header
                 && header.segments().getFirst().text().equals(this.nothingSelected.segments().getFirst().text())) {
             offsetX = (this.dependencyDialog.getWidth() - header.segments().getFirst().text().length()) / 2;
@@ -1688,7 +1741,12 @@ public class SpringInit {
                 builder.append(RESET_COLOR);
             }
             case DependencyRow depRow -> {
-                builder.append("  ").append(UNSELECTED).append(" ").append(depRow.dependency().name());
+                if (depRow.isSelected()) {
+                    builder.append("  ").append(GREEN).append(SELECTED).append(RESET_COLOR).append(" ")
+                            .append(depRow.dependency().name());
+                } else {
+                    builder.append("  ").append(UNSELECTED).append(" ").append(depRow.dependency().name());
+                }
             }
         }
 
@@ -1727,17 +1785,6 @@ public class SpringInit {
         for (int i = 0; i < this.DEPENDENCY_MENU_ITEMS.size(); i++) {
             if (i == this.dependencyDialog.getHeight() - SCROLL_DEP_MARGIN + 1) {
                 break;
-            }
-
-            if (i == 4 && this.selectedDependencies.size() > 0) {
-                for (int j = 0; j < this.selectedDependencies.size(); j++) {
-                    renderDependencyRow(this.selectedDependencies.get(j), builder, offsetY,
-                            offsetX,
-                            isHighlighted(j),
-                            j);
-                    offsetY++;
-                }
-                continue;
             }
 
             int index = i + this.depScrollOffsetY;
@@ -1809,22 +1856,23 @@ public class SpringInit {
     }
 
     private void fillDialogRows() {
-        if (this.DEPENDENCY_MENU_ITEMS.size() > 0) {
-            return;
-        }
+        populateTempSelectedDependencyList();
+        populateAllDependencyList();
 
-        Spacer spacer = new Spacer();
+        this.DEPENDENCY_MENU_ITEMS.clear();
+
+        this.spacer = new Spacer();
 
         this.filter = new Header(List.of(
                 new TextSegment("Group Filter: press <C-f> to apply filter", WHITE)));
 
         this.selected = new Header(List.of(
                 new TextSegment("Selected ", WHITE),
-                new TextSegment("(" + this.selectedDependencies.size() + ")", BORDER_COLOR)));
+                new TextSegment("(" + this.tempSelectedDependencies.size() + ")", BORDER_COLOR)));
 
         this.available = new Header(List.of(
                 new TextSegment("Available ", WHITE),
-                new TextSegment("(" + this.allDependencies.length + ")", BORDER_COLOR)));
+                new TextSegment("(" + this.availableDependencies.size() + ")", BORDER_COLOR)));
 
         this.nothingSelected = new Header(List.of(
                 new TextSegment("No dependencies.", BORDER_COLOR)));
@@ -1833,34 +1881,46 @@ public class SpringInit {
         this.DEPENDENCY_MENU_ITEMS.add(filter);
         this.DEPENDENCY_MENU_ITEMS.add(spacer);
         this.DEPENDENCY_MENU_ITEMS.add(selected);
-        this.DEPENDENCY_MENU_ITEMS.add(nothingSelected);
+
+        if (this.selectedDependencies.isEmpty()) {
+            this.DEPENDENCY_MENU_ITEMS.add(nothingSelected);
+        } else {
+            for (DependencyRow row : this.selectedDependencies) {
+                this.DEPENDENCY_MENU_ITEMS.add(row);
+            }
+        }
+
         this.DEPENDENCY_MENU_ITEMS.add(spacer);
         this.DEPENDENCY_MENU_ITEMS.add(available);
 
-        for (Dependency dependency : this.allDependencies) {
-            DependencyRow depRow = new DependencyRow(dependency);
-            this.DEPENDENCY_MENU_ITEMS.add(depRow);
+        for (DependencyRow row : this.availableDependencies) {
+            this.DEPENDENCY_MENU_ITEMS.add(row);
         }
     }
 
-    private int calculateTotalDependencies() {
-        int counter = 0;
-
-        for (DependencyGroup group : this.dependencies.values()) {
-            counter += group.values().length;
+    private void populateTempSelectedDependencyList() {
+        if (this.selectedDependencies.isEmpty()) {
+            debug("selected is empty");
+            return;
         }
 
-        return counter;
+        this.tempSelectedDependencies = new ArrayList<>(this.selectedDependencies);
     }
 
-    private void populateAllDependencyArray() {
-        this.allDependencies = new Dependency[calculateTotalDependencies()];
-
-        int position = 0;
+    private void populateAllDependencyList() {
+        this.availableDependencies = new ArrayList<>();
 
         for (DependencyGroup group : this.dependencies.values()) {
-            System.arraycopy(group.values(), 0, this.allDependencies, position, group.values().length);
-            position += group.values().length;
+            for (Dependency dep : group.values()) {
+                DependencyRow depRow = new DependencyRow(dep, false);
+
+                if (this.tempSelectedDependencies.stream().anyMatch(row -> row.dependency().equals(dep))) {
+                    debug(depRow.dependency().name());
+                    continue;
+                }
+
+                this.availableDependencies.add(depRow);
+            }
         }
     }
 
