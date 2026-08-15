@@ -130,9 +130,11 @@ public class SpringInit {
     private Header filter, selected, available, nothingSelected;
     private Dialog dependencyDialog;
     private int depCursorY = 0, previousDepCursorY = 0, depScrollOffsetY = 0;
+    private DependencyRow[] allDependencies;
     private List<DependencyRow> availableDependencies, tempSelectedDependencies, selectedDependencies;
+    private DependencyGroup selectedGroup;
     private static final int SCROLL_DEP_MARGIN = 5;
-    private boolean scrollOffsetChanged;
+    private boolean scrollOffsetChanged, tempSelectedDepListChanged;
 
     // ------------------------------------------------------------------
 
@@ -206,7 +208,8 @@ public class SpringInit {
             fetchSpringInitData();
         }
 
-        // debug("");
+        this.allDependencies = new DependencyRow[calculateTotalDependencies()];
+        populateDependencyArray();
 
         this.group = new TextField(this.data.groupId().defaultValue());
         this.artifact = new TextField(this.data.artifactId().defaultValue());
@@ -1483,14 +1486,47 @@ public class SpringInit {
                     if (this.scrollOffsetChanged) {
                         rerenderDependencies();
                     }
+
+                    saveCursor();
+                    StringBuilder builder = new StringBuilder();
+                    renderDialogStatusBar(builder);
+                    IO.print(builder);
+                    restoreCursor();
                 }
                 case ' ' -> {
-                    selectDependency();
-                    if (this.tempSelectedDependencies.size() > 1) {
-                        moveDependencyCursor('B');
-                        moveDependencyCursorLine();
+                    if (isSelected()) {
+                        boolean isDeselectable = deselectDependency();
+
+                        if (isDeselectable) {
+                            this.tempSelectedDepListChanged = true;
+                        }
+
+                        if (this.tempSelectedDependencies.size() > 1 && isDeselectable) {
+                            moveDependencyCursor('B');
+                            moveDependencyCursorLine();
+                        }
+
+                        if (this.tempSelectedDepListChanged) {
+                            rerenderDependencies();
+                            this.tempSelectedDepListChanged = false;
+                        }
+                    } else {
+                        boolean isAvailableDepRow = selectDependency();
+
+                        if (isAvailableDepRow) {
+                            this.tempSelectedDepListChanged = true;
+                        }
+
+                        if (this.tempSelectedDependencies.size() > 1 && isAvailableDepRow) {
+                            moveDependencyCursor('B');
+                            moveDependencyCursorLine();
+                        }
+
+                        if (this.tempSelectedDepListChanged) {
+                            rerenderDependencies();
+                            this.tempSelectedDepListChanged = false;
+                        }
                     }
-                    rerenderDependencies();
                 }
                 case '\r', '\n' -> {
                     saveDependencies();
@@ -1526,30 +1562,63 @@ public class SpringInit {
         removeDialogWindow();
     }
 
-    private void selectDependency() {
+    private boolean selectDependency() {
         int selectedSize = 1, uiRows = 6;
         if (!this.tempSelectedDependencies.isEmpty()) {
             selectedSize = this.tempSelectedDependencies.size();
         }
 
+        // Example: first dependency in the available list "GraalVM Native Support"
+        // which would be index 0 with also nothing selected at the moment:
+        // index = 7 - 1 - 6 + 0 = 0
         int index = this.depCursorY - selectedSize - uiRows + this.depScrollOffsetY;
 
         if (index < 0) {
-            return;
+            return false;
         }
 
         DependencyRow dependencyRow = this.availableDependencies.get(index);
 
-        // debug(dependencyRow.dependency().name());
         this.availableDependencies.remove(dependencyRow);
 
-        DependencyRow updatedRow = new DependencyRow(dependencyRow.dependency(), true);
+        DependencyRow updatedRow = new DependencyRow(dependencyRow.dependency(), true, dependencyRow.originalIndex());
         this.tempSelectedDependencies.add(updatedRow);
 
         updateSelectedHeader();
         updateAvailableHeader();
 
         rebuildDependencyMenu();
+        return true;
+    }
+
+    private boolean deselectDependency() {
+        int selectedDepStartIndex = 4;
+        int index = this.depCursorY - selectedDepStartIndex;
+
+        if (index < 0) {
+            return false;
+        }
+
+        DependencyRow dependencyRow = this.tempSelectedDependencies.get(index);
+        this.tempSelectedDependencies.remove(index);
+
+        int originalIndex = dependencyRow.originalIndex();
+
+        int insertIndex = 0;
+
+        while (insertIndex < this.availableDependencies.size()
+                && this.availableDependencies.get(insertIndex).originalIndex() < originalIndex) {
+            insertIndex++;
+        }
+
+        DependencyRow updatedRow = new DependencyRow(dependencyRow.dependency(), false, dependencyRow.originalIndex());
+        this.availableDependencies.add(insertIndex - 1, updatedRow);
+
+        updateSelectedHeader();
+        updateAvailableHeader();
+
+        rebuildDependencyMenu();
+        return true;
     }
 
     private void saveDependencies() {
@@ -1742,8 +1811,13 @@ public class SpringInit {
             }
             case DependencyRow depRow -> {
                 if (depRow.isSelected()) {
-                    builder.append("  ").append(GREEN).append(SELECTED).append(RESET_COLOR).append(" ")
-                            .append(depRow.dependency().name());
+                    builder.append("  ").append(GREEN).append(SELECTED).append(RESET_COLOR);
+
+                    if (isHighlighted) {
+                        builder.append(DEP_LINE_COLOR);
+                    }
+
+                    builder.append(" ").append(depRow.dependency().name());
                 } else {
                     builder.append("  ").append(UNSELECTED).append(" ").append(depRow.dependency().name());
                 }
@@ -1900,7 +1974,6 @@ public class SpringInit {
 
     private void populateTempSelectedDependencyList() {
         if (this.selectedDependencies.isEmpty()) {
-            debug("selected is empty");
             return;
         }
 
@@ -1910,22 +1983,49 @@ public class SpringInit {
     private void populateAllDependencyList() {
         this.availableDependencies = new ArrayList<>();
 
+        int originalIndex = 0;
+
         for (DependencyGroup group : this.dependencies.values()) {
             for (Dependency dep : group.values()) {
-                DependencyRow depRow = new DependencyRow(dep, false);
+                DependencyRow depRow = new DependencyRow(dep, false, originalIndex);
 
                 if (this.tempSelectedDependencies.stream().anyMatch(row -> row.dependency().equals(dep))) {
-                    debug(depRow.dependency().name());
                     continue;
                 }
 
                 this.availableDependencies.add(depRow);
+
+                originalIndex++;
             }
         }
     }
 
+    private int calculateTotalDependencies() {
+        int counter = 0;
+
+        for (DependencyGroup group : this.dependencies.values()) {
+            for (Dependency _ : group.values()) {
+                counter++;
+            }
+        }
+
+        return counter;
+    }
+
+    private void populateDependencyArray() {
+        int index = 0;
+
+        for (DependencyGroup group : this.dependencies.values()) {
+            for (Dependency dep : group.values()) {
+                this.allDependencies[index] = new DependencyRow(dep, false, index);
+                index++;
+            }
+        }
+
+    }
+
     private void renderDialogStatusBar(StringBuilder builder) {
-        boolean isSelected = false;
+        boolean isSelected = isSelected();
 
         String hintsSelected = "↑↓ Navigate  Space Deselect  gg Start  G End  Enter Save  Esc Cancel";
         String hintsUnselected = "↑↓ Navigate  Space Select  gg Start  G End  Enter Save  Esc Cancel";
@@ -1941,6 +2041,17 @@ public class SpringInit {
 
         positionDialogCursor(this.dependencyDialog.getHeight() - 2, 1, builder);
         builder.append(" ".repeat(space)).append(hints).append(" ".repeat(space));
+    }
+
+    private boolean isSelected() {
+        if (this.tempSelectedDependencies.isEmpty()) {
+            return false;
+        }
+
+        int selectedDepStartIndex = 4;
+
+        return this.depCursorY >= selectedDepStartIndex
+                && this.depCursorY < selectedDepStartIndex + this.tempSelectedDependencies.size();
     }
 
     private void renderDialogBackGround() {
