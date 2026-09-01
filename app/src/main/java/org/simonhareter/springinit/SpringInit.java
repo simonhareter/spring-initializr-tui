@@ -15,6 +15,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import org.simonhareter.springinit.libc.Terminal;
@@ -165,6 +166,7 @@ public class SpringInit {
                 renderUI();
                 renderStatusBar();
             }
+            debug(this.selectedDependencies.size());
         }
 
         leaveAlternateBuffer();
@@ -401,8 +403,11 @@ public class SpringInit {
                     .append("&packaging=").append(this.data.packaging().values().get(this.currentSelection[6]).id())
                     .append("&javaVersion=").append(this.data.javaVersion().values().get(this.currentSelection[8]).id())
                     .append("&configurationFileFormat=")
-                    .append(this.data.configurationFileFormat().values().get(this.currentSelection[7]).id());
+                    .append(this.data.configurationFileFormat().values().get(this.currentSelection[7]).id())
+                    .append("&dependencies=").append(this.selectedDependencies.stream()
+                            .map(row -> row.dependency().id()).collect(Collectors.joining(",")));
 
+           
             URL url = URI.create(builder.toString()).toURL();
 
             HttpURLConnection con = (HttpURLConnection) url.openConnection();
