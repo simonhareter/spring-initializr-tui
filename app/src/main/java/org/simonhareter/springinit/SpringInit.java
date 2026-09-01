@@ -133,7 +133,6 @@ public class SpringInit {
     private int depCursorY = 0, previousDepCursorY = 0, depScrollOffsetY = 0;
     private DependencyRow[] allDependencies;
     private List<DependencyRow> availableDependencies, tempSelectedDependencies, selectedDependencies;
-    private DependencyGroup selectedGroup;
     private static final int SCROLL_DEP_MARGIN = 5;
     private boolean scrollOffsetChanged, tempSelectedDepListChanged;
 
@@ -166,7 +165,6 @@ public class SpringInit {
                 renderUI();
                 renderStatusBar();
             }
-            debug(this.selectedDependencies.size());
         }
 
         leaveAlternateBuffer();
@@ -407,7 +405,6 @@ public class SpringInit {
                     .append("&dependencies=").append(this.selectedDependencies.stream()
                             .map(row -> row.dependency().id()).collect(Collectors.joining(",")));
 
-           
             URL url = URI.create(builder.toString()).toURL();
 
             HttpURLConnection con = (HttpURLConnection) url.openConnection();
@@ -2134,5 +2131,4 @@ public class SpringInit {
         renderUI();
         renderStatusBar();
     }
-
 }
