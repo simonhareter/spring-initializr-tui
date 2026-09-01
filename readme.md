@@ -23,7 +23,7 @@ spring-initializr
 
 ## Requirements
 
-* Java 21+
+* Java 25+
 * A terminal with ANSI/TTY support
 * Internet connection
 
